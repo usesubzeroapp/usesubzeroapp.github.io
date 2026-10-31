@@ -92,6 +92,25 @@ h2 { margin:8px 0 7px; font-size:clamp(27px,4vw,39px); line-height:1.08; letter-
 .toast.show { display:block; }
 @media(max-width:800px) { .app { padding:17px; } .content-grid { grid-template-columns:1fr; } .side-stack { display:grid; grid-template-columns:1fr 1fr; } }
 @media(max-width:560px) { .topbar { align-items:flex-start; } .pill { display:none; } .hero { align-items:flex-start; flex-direction:column; } .stats { grid-template-columns:1fr 1fr; } .stat:last-child { grid-column:1/-1; } .side-stack { display:flex; } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .sub-row { gap:8px; } .sub-cost { font-size:12px; } }
+
+/* SubZero 1.0 dashboard improvements */
+.dashboard-tools { display:flex; gap:10px; flex-wrap:wrap; padding:0 20px 16px; }
+.dashboard-tools input,.dashboard-tools select { background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:11px;padding:11px 12px;min-width:0; }
+.dashboard-tools input { flex:1 1 180px; }
+.dashboard-tools select { flex:0 1 165px; }
+.insight-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 20px; }
+.insight { padding:16px 19px;border:1px solid var(--line);border-radius:17px;background:var(--panel); }
+.insight-label { color:var(--muted);font-size:11px;margin-bottom:9px; }
+.insight-value { font-size:19px;font-weight:800;letter-spacing:-.5px;overflow-wrap:anywhere; }
+.insight-detail { font-size:11px;color:var(--muted);margin-top:6px; }
+.section-heading { font-size:15px;margin:0 0 12px; }
+.category-panel { padding:20px;margin-top:16px; }
+.category-line { display:flex;align-items:center;gap:12px;margin-top:12px; }
+.category-name { width:100px;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.category-track { flex:1;height:9px;background:var(--panel2);border-radius:20px;overflow:hidden; }
+.category-fill { height:100%;background:var(--accent);border-radius:20px; }
+.category-amount { width:75px;text-align:right;font-size:12px;font-weight:700; }
+@media(max-width:650px) { .insight-grid { grid-template-columns:1fr;gap:9px; } .dashboard-tools { padding:0 14px 14px; } }
 </style>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=subzeroTurnstileLoaded" async defer></script>
 </head>
@@ -117,13 +136,20 @@ h2 { margin:8px 0 7px; font-size:clamp(27px,4vw,39px); line-height:1.08; letter-
       <article class="stat"><div class="stat-top"><span>Yearly estimate</span><span class="stat-icon">◷</span></div><div class="stat-value" id="yearlyTotal">$0</div><div class="stat-note">If your subscriptions stay unchanged</div></article>
       <article class="stat"><div class="stat-top"><span>Active subscriptions</span><span class="stat-icon">▤</span></div><div class="stat-value" id="activeCount">0</div><div class="stat-note" id="upcomingNote">Add your first subscription to begin</div></article>
     </section>
+    <section class="insight-grid" aria-label="Spending insights">
+      <article class="insight"><div class="insight-label">Next 7 days</div><div class="insight-value" id="next7Total">$0.00</div><div class="insight-detail" id="next7Detail">No upcoming payments</div></article>
+      <article class="insight"><div class="insight-label">Next 30 days</div><div class="insight-value" id="next30Total">$0.00</div><div class="insight-detail" id="next30Detail">Based on scheduled renewals</div></article>
+      <article class="insight"><div class="insight-label">Largest monthly cost</div><div class="insight-value" id="largestCost">$0.00</div><div class="insight-detail" id="largestDetail">No subscriptions yet</div></article>
+    </section>
     <section class="content-grid">
       <article class="panel">
         <div class="panel-head"><div><h3>Your subscriptions</h3><p>Keep all your recurring payments in one view.</p></div><button class="text-btn" id="addInline">＋ Add new</button></div>
+        <div class="dashboard-tools"><input id="searchSubs" type="search" aria-label="Search subscriptions" placeholder="Search subscriptions..."><select id="categoryFilter" aria-label="Filter by category"><option value="all">All categories</option><option>Entertainment</option><option>Music</option><option>Gaming</option><option>Software</option><option>Fitness</option><option>Shopping</option><option>Other</option></select><select id="sortSubs" aria-label="Sort subscriptions"><option value="renewal">Next renewal</option><option value="name">Name (A–Z)</option><option value="cost">Highest monthly cost</option></select></div>
         <div class="sub-list" id="subList"></div>
       </article>
       <aside class="side-stack">
         <section class="next-card"><div class="eyebrow">Coming up</div><h3>Renewals at a glance</h3><p>Your next expected payments, all in one place.</p><div id="renewalList"></div></section>
+        <section class="panel category-panel"><h3 class="section-heading">Spending by category</h3><div id="categoryBreakdown" aria-label="Monthly cost by category"></div></section>
         <section class="panel tips"><h3>Make SubZero work for you</h3><div class="tip"><span class="tip-symbol">✧</span><div><b>Start with the small charges</b><p>Forgotten subscriptions can be easy to overlook. Add the ones you use and review the rest.</p></div></div><div class="tip"><span class="tip-symbol">◷</span><div><b>Check dates before renewal</b><p>Use the next-payment date to plan ahead. SubZero shows renewal dates but does not send automatic notifications.</p></div></div><div class="tip"><span class="tip-symbol">⌁</span><div><b>Saved on this device</b><p>Subscriptions are saved in this browser unless you sign in for cloud sync. Export a CSV backup regularly.</p></div></div></section>
       </aside>
     </section>
@@ -223,14 +249,46 @@ function render(){
  $('monthlyTotal').textContent=money(m);$('yearlyTotal').textContent=money(m*12).replace(/\.00$/,'');$('activeCount').textContent=subscriptions.length;
  const upcoming=[...subscriptions].sort((a,b)=>nextDate(a)-nextDate(b));
  $('upcomingNote').textContent=upcoming.length?`${upcoming.length} renewal${upcoming.length===1?'':'s'} tracked`:'Add your first subscription to begin';
- $('subList').innerHTML=subscriptions.length?subscriptions.map(s=>`<div class="sub-row"><div class="app-icon" style="color:${colors[s.category]||'var(--accent)'}">${icons[s.category]||'◈'}</div><div class="sub-info"><div class="sub-name">${escapeHTML(s.name)}</div><div class="sub-meta">${escapeHTML(s.category)} · Next: ${nextDate(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div></div><div class="sub-cost">${money(s.price)}<span>/${s.frequency==='yearly'?'year':s.frequency==='weekly'?'week':'month'}</span></div><button class="more" title="Edit ${escapeHTML(s.name)}" aria-label="Edit ${escapeHTML(s.name)}" data-edit="${escapeHTML(s.id)}">✎</button><button class="more" title="Remove ${escapeHTML(s.name)}" aria-label="Remove ${escapeHTML(s.name)}" data-remove="${escapeHTML(s.id)}">×</button></div>`).join(''):`<div class="empty"><b>No subscriptions yet</b>Add your first recurring payment to see your monthly total here.<br><br><button class="btn" id="emptyAdd">＋ Add subscription</button></div>`;
+ const q=$('searchSubs').value.trim().toLowerCase();
+ const category=$('categoryFilter').value;
+ const visible=subscriptions.filter(s=>(category==='all'||s.category===category)&&(!q||s.name.toLowerCase().includes(q)||s.category.toLowerCase().includes(q)));
+ const sort=$('sortSubs').value;
+ visible.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='cost'?monthly(b)-monthly(a):nextDate(a)-nextDate(b));
+ $('subList').innerHTML=visible.length?visible.map(s=>`<div class="sub-row"><div class="app-icon" style="color:${colors[s.category]||'var(--accent)'}">${icons[s.category]||'◈'}</div><div class="sub-info"><div class="sub-name">${escapeHTML(s.name)}</div><div class="sub-meta">${escapeHTML(s.category)} · Next: ${nextDate(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div></div><div class="sub-cost">${money(s.price)}<span>/${s.frequency==='yearly'?'year':s.frequency==='weekly'?'week':'month'}</span></div><button class="more" title="Edit ${escapeHTML(s.name)}" aria-label="Edit ${escapeHTML(s.name)}" data-edit="${escapeHTML(s.id)}">✎</button><button class="more" title="Remove ${escapeHTML(s.name)}" aria-label="Remove ${escapeHTML(s.name)}" data-remove="${escapeHTML(s.id)}">×</button></div>`).join(''):`<div class="empty"><b>${subscriptions.length?'No matching subscriptions':'No subscriptions yet'}</b>${subscriptions.length?'Try another search or category.':'Add your first recurring payment to see your monthly total here.'}<br><br>${subscriptions.length?'':'<button class="btn" id="emptyAdd">＋ Add subscription</button>'}</div>`;
  $('renewalList').innerHTML=upcoming.length?upcoming.slice(0,3).map(s=>{const p=dateParts(nextDate(s));return `<div class="renewal"><div class="datebox"><b>${p.day}</b><span>${p.month}</span></div><div class="renewal-info"><b>${escapeHTML(s.name)}</b><span>${escapeHTML(s.category)}</span></div><strong>${money(s.price)}</strong></div>`}).join(''):`<div class="renewal"><p style="color:#a9bfd4;font-size:12px">Your upcoming payments will appear here.</p></div>`;
+ function expectedPayments(days){
+  const today=dateObj(futureDate(0)),end=dateObj(futureDate(days-1));
+  let total=0,count=0;
+  for(const sub of subscriptions){
+   let d=nextDate(sub),i=0;
+   while(d<=end && i++<150){
+    if(d>=today){total+=sub.price;count++;}
+    if(sub.frequency==='weekly')d.setDate(d.getDate()+7);
+    else {const day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+(sub.frequency==='yearly'?12:1));d.setDate(Math.min(day,new Date(d.getFullYear(),d.getMonth()+1,0).getDate()));}
+   }
+  }
+  return {total,count};
+ }
+ const seven=expectedPayments(7),thirty=expectedPayments(30);
+ $('next7Total').textContent=money(seven.total);
+ $('next7Detail').textContent=seven.count+' expected payment'+(seven.count===1?'':'s');
+ $('next30Total').textContent=money(thirty.total);
+ $('next30Detail').textContent=thirty.count+' expected payment'+(thirty.count===1?'':'s');
+ const largest=[...subscriptions].sort((a,b)=>monthly(b)-monthly(a))[0];
+ $('largestCost').textContent=largest?money(monthly(largest)):money(0);
+ $('largestDetail').textContent=largest?largest.name+' · monthly equivalent':'No subscriptions yet';
+ const byCategory={};
+ for(const sub of subscriptions)byCategory[sub.category]=(byCategory[sub.category]||0)+monthly(sub);
+ const ranked=Object.entries(byCategory).sort((a,b)=>b[1]-a[1]);
+ const max=ranked[0]?.[1]||1;
+ $('categoryBreakdown').innerHTML=ranked.length?ranked.map(([name,value])=>`<div class="category-line"><span class="category-name">${escapeHTML(name)}</span><div class="category-track"><div class="category-fill" style="width:${Math.max(2,100*value/max)}%;background:${colors[name]||'var(--accent)'}"></div></div><span class="category-amount">${money(value)}</span></div>`).join(''):'<p class="auth-message">Add subscriptions to see your spending breakdown.</p>';
  if($('emptyAdd'))$('emptyAdd').addEventListener('click',()=>openModal());
  document.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>openModal(b.dataset.edit)));
  document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async()=>{const s=subscriptions.find(x=>String(x.id)===b.dataset.remove);if(!s||!confirm(`Remove ${s.name}?`))return;try{if(cloudMode)await cloudDelete(s.id);subscriptions=subscriptions.filter(x=>x.id!==s.id);persist();render();showToast('Subscription removed.');}catch(e){showToast('Delete failed: '+e.message);}}));
 }
 function openModal(id=null){editingId=id;$('subscriptionForm').reset();const s=subscriptions.find(x=>String(x.id)===String(id));$('modalTitle').textContent=s?'Edit subscription':'Add a subscription';$('serviceName').value=s?.name||'';$('price').value=s?.price||'';$('frequency').value=s?.frequency||'monthly';$('nextDate').value=s?.date||futureDate(7);$('category').value=s?.category||'Entertainment';$('modalBackdrop').classList.add('open');$('serviceName').focus();}
 function closeModal(){$('modalBackdrop').classList.remove('open');editingId=null;}
+['searchSubs','categoryFilter','sortSubs'].forEach(id=>$(id).addEventListener(id==='searchSubs'?'input':'change',render));
 $('addTop').addEventListener('click',()=>openModal());$('addInline').addEventListener('click',()=>openModal());$('cancelModal').addEventListener('click',closeModal);
 $('modalBackdrop').addEventListener('click',e=>{if(e.target===$('modalBackdrop'))closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 $('subscriptionForm').addEventListener('submit',async e=>{
