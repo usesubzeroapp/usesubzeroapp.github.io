@@ -93,6 +93,7 @@ h2 { margin:8px 0 7px; font-size:clamp(27px,4vw,39px); line-height:1.08; letter-
 @media(max-width:800px) { .app { padding:17px; } .content-grid { grid-template-columns:1fr; } .side-stack { display:grid; grid-template-columns:1fr 1fr; } }
 @media(max-width:560px) { .topbar { align-items:flex-start; } .pill { display:none; } .hero { align-items:flex-start; flex-direction:column; } .stats { grid-template-columns:1fr 1fr; } .stat:last-child { grid-column:1/-1; } .side-stack { display:flex; } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .sub-row { gap:8px; } .sub-cost { font-size:12px; } }
 </style>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=subzeroTurnstileLoaded" async defer></script>
 </head>
 <body>
 <div class="app" id="appRoot">
@@ -104,6 +105,7 @@ h2 { margin:8px 0 7px; font-size:clamp(27px,4vw,39px); line-height:1.08; letter-
     <section class="auth-panel" aria-label="Account and sync">
       <div class="auth-row"><div><b id="authTitle">Cloud sync (optional)</b><div class="auth-message" id="authStatus">Your existing subscriptions are saved in this browser. Sign in to sync across devices.</div></div><div class="auth-buttons"><button class="btn secondary" id="authToggle">Sign in / Sign up</button><button class="btn secondary" id="signOutBtn" hidden>Sign out</button><button class="btn secondary" id="changePasswordBtn" hidden>Change password</button><button class="btn secondary" id="importBtn" hidden>Import this browser's subscriptions</button></div></div>
       <form id="authForm" class="auth-form" hidden><input type="email" id="authEmail" autocomplete="email" placeholder="Email address" required><input type="password" id="authPassword" autocomplete="current-password" minlength="6" placeholder="Password (6+ characters)" required><button class="btn" type="submit" id="loginBtn">Sign in</button><button class="btn secondary" type="button" id="signupBtn">Create account</button><button class="text-btn" type="button" id="forgotBtn">Forgot password?</button></form>
+      <div id="captchaPanel" hidden style="margin-top:12px"><div id="turnstileWidget"></div><p class="auth-message">Complete the security check before signing in, creating an account, or requesting password recovery.</p></div>
       <form id="resetForm" class="auth-form" hidden><input id="newPassword" type="password" autocomplete="new-password" minlength="12" placeholder="New password (12+ characters)" required><input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" placeholder="Confirm new password" required><button class="btn" type="submit">Update password</button></form>
     </section>
     <section class="hero">
@@ -184,6 +186,7 @@ async function cloudLoad(){
 function updateAuthUI(){
  $('authTitle').textContent=cloudMode?'Cloud sync enabled':'Cloud sync (optional)';
  $('signOutBtn').hidden=!cloudMode;$('authToggle').hidden=cloudMode;if(!recoveryMode)$('authForm').hidden=true;$('changePasswordBtn').hidden=!cloudMode;
+ $('captchaPanel').hidden=$('authForm').hidden; if(!$('captchaPanel').hidden)renderCaptcha();
  $('importBtn').hidden=!cloudMode||!localBackup.length;
 }
 async function signOut(){
@@ -239,21 +242,49 @@ $('subscriptionForm').addEventListener('submit',async e=>{
  try{if(cloudMode)await cloudSave(item);if(existing)subscriptions=subscriptions.map(s=>s.id===existing.id?item:s);else subscriptions.push(item);persist();render();closeModal();showToast(existing?'Subscription updated.':'Subscription saved.');}
  catch(err){showToast('Could not save: '+err.message);}
 });
-$('authToggle').addEventListener('click',()=>{if(!keySetup())return;$('authForm').hidden=!$('authForm').hidden;});
+// Cloudflare Turnstile uses a public site key; the secret stays in Supabase.
+const TURNSTILE_SITE_KEY = '0x4AAAAAAFegmnCaLbU3MXZX';
+let captchaWidgetId = null;
+function renderCaptcha(){
+ if($('captchaPanel').hidden || captchaWidgetId !== null || !window.turnstile)return;
+ try {
+  captchaWidgetId=window.turnstile.render('#turnstileWidget',{
+   sitekey:TURNSTILE_SITE_KEY,theme:'dark',
+   'error-callback':()=>authMessage('CAPTCHA could not load. Refresh the page and try again.'),
+   'expired-callback':()=>authMessage('CAPTCHA expired. Please complete the security check again.')
+  });
+ }catch(err){authMessage('CAPTCHA could not load. Please refresh and try again.');}
+}
+window.subzeroTurnstileLoaded=renderCaptcha;
+function captchaToken(){return captchaWidgetId===null?'':(window.turnstile?.getResponse?.(captchaWidgetId)||'');}
+function resetCaptcha(){if(captchaWidgetId!==null && window.turnstile)window.turnstile.reset(captchaWidgetId);}
+function requireCaptcha(){
+ const token=captchaToken();
+ if(!token){authMessage('Please complete the CAPTCHA security check first.');return null;}
+ return token;
+}
+$('authToggle').addEventListener('click',()=>{
+ if(!keySetup())return;
+ $('authForm').hidden=!$('authForm').hidden;
+ $('captchaPanel').hidden=$('authForm').hidden;
+ renderCaptcha();
+});
 async function authenticate(kind){
  if(!keySetup())return;
  const email=$('authEmail').value.trim(),password=$('authPassword').value;
  if(!email||password.length<6){authMessage('Enter an email and password of at least 6 characters.');return;}
+ const captcha_token=requireCaptcha();if(!captcha_token)return;
  try{
   if(kind==='signup'){
-   const data=await api('/auth/v1/signup',{method:'POST',body:JSON.stringify({email,password})});
+   const data=await api('/auth/v1/signup',{method:'POST',body:JSON.stringify({email,password,gotrue_meta_security:{captcha_token}})});
    if(!data.access_token){authMessage('Account requested. Check your email for a confirmation link, then return and sign in.');return;}
    session=data;
   }else{
-   session=await api('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password})});
+   session=await api('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password,gotrue_meta_security:{captcha_token}})});
   }
   localStorage.setItem(SESSION_KEY,JSON.stringify(session));localBackup=readLocal();await cloudLoad();
  }catch(err){authMessage('Authentication failed: '+err.message);}
+ finally{resetCaptcha();}
 }
 $('authForm').addEventListener('submit',e=>{e.preventDefault();authenticate('signin');});
 $('signupBtn').addEventListener('click',()=>authenticate('signup'));
@@ -261,10 +292,12 @@ $('forgotBtn').addEventListener('click',async()=>{
  if(!keySetup())return;
  const email=$('authEmail').value.trim();
  if(!email){authMessage('Enter your email address first, then click Forgot password?');return;}
+ const captcha_token=requireCaptcha();if(!captcha_token)return;
  try{
-  await api('/auth/v1/recover',{method:'POST',body:JSON.stringify({email}),headers:{}});
+  await api('/auth/v1/recover',{method:'POST',body:JSON.stringify({email,gotrue_meta_security:{captcha_token}})});
   authMessage('If that email has an account, a recovery email will arrive. Open its link on this website.');
  }catch(err){authMessage('Could not request recovery: '+err.message);}
+ finally{resetCaptcha();}
 });
 $('resetForm').addEventListener('submit',async e=>{
  e.preventDefault();
@@ -277,7 +310,7 @@ $('resetForm').addEventListener('submit',async e=>{
   $('newPassword').value='';$('confirmPassword').value='';
   recoveryMode=false;recoveryAccessToken=null;$('resetForm').hidden=true;
   session=null;cloudMode=false;localStorage.removeItem(SESSION_KEY);updateAuthUI();
-  $('authForm').hidden=false;authMessage('Password changed successfully. Sign in with your new password.');
+  $('authForm').hidden=false;$('captchaPanel').hidden=false;renderCaptcha();authMessage('Password changed successfully. Sign in with your new password.');
  }catch(err){authMessage('Password reset failed: '+err.message);}
   });
 $('changePasswordBtn').addEventListener('click', async () => {
